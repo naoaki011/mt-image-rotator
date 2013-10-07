@@ -150,7 +150,7 @@ sub bulk_rotate_image {
     # Degree
     my $action = $app->param('action_name') || 'rotate_90';
     my ( $deg ) = $action =~ m!rotate_(\d+)!;
-    $deg ||= 90;
+    $deg ||= 'auto';
 
     # Ids
     my @ids = $app->param('id');
@@ -175,11 +175,47 @@ sub bulk_rotate_image {
             # System scope image(userpic)
             next unless $author->is_superuser;
         }
-
-        # Rotate image
-        _rotate_image( $app, $asset, $deg );
-
-        $done++;
+        if ($deg eq 'auto') {
+            eval { require Image::ExifTool; };
+            if ($@) {
+                MT->log('Auto Rotate required Image::ExifTool module.');
+                last;
+            }
+            my $exif = new Image::ExifTool;
+            if (my $exif_data = $exif->ImageInfo( $asset->file_path )) {
+                my $exif_rot = $exif_data->{Orientation} || '';
+                MT->log('Orientation: ' . $exif_rot);
+                unless ($exif_rot) {
+                    MT->log('No Orientation.');
+                    next;
+                }
+                if ($exif_rot =~ m!Mirror!) {
+                    MT->log('Cant manupilate Mirror image.');
+                    next;
+                }
+                if ( $exif_rot eq 'Rotate 90 CW') {
+                    $exif_rot = 90;
+                }
+                if ( $exif_rot eq 'Rotate 180') {
+                    $exif_rot = 180;
+                }
+                if ( $exif_rot eq 'Rotate 270 CW') {
+                    $exif_rot = 270;
+                }
+                if ($exif_rot) {
+                    # Auto Rotate image
+                    _rotate_image( $app, $asset, $exif_rot );
+                    $done++;
+                }
+            } else {
+                MT->log('Image has no Exif data.');
+                next;
+            }
+        } else {
+            # Rotate image
+            _rotate_image( $app, $asset, $deg );
+            $done++;
+        }
     }
 
     $app->add_return_arg( 'rotated' => 1, 'done' => $done );
